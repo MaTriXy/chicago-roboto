@@ -1,67 +1,61 @@
 package com.chicagoroboto.data
 
 import com.chicagoroboto.model.Speaker
-import com.google.firebase.database.DataSnapshot
-import com.google.firebase.database.DatabaseError
-import com.google.firebase.database.DatabaseReference
-import com.google.firebase.database.GenericTypeIndicator
-import com.google.firebase.database.Query
-import com.google.firebase.database.ValueEventListener
-import java.util.HashMap
+import com.google.firebase.database.*
+import com.google.firebase.storage.StorageReference
+import kotlinx.coroutines.channels.awaitClose
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.channelFlow
+import kotlinx.coroutines.tasks.await
+import timber.log.Timber
+import timber.log.error
+import java.util.*
+import javax.inject.Inject
 
-class FirebaseSpeakerProvider(private val database: DatabaseReference) : SpeakerProvider {
+class FirebaseSpeakerProvider @Inject constructor(
+    database: DatabaseReference,
+    storage: StorageReference
+) : SpeakerProvider {
 
-    private val queries: MutableMap<Any, Query> = mutableMapOf()
-    private val listeners: MutableMap<Any, ValueEventListener> = mutableMapOf()
+  private val speakersRef = database.child("speakers")
+  private val avatarRef = storage.child("profiles")
 
-    override fun addSpeakerListener(key: Any, onComplete: (Map<String, Speaker>?) -> Unit) {
-        if (queries[key] != null) {
-            removeSpeakerListener(key)
+  override fun speakers(): Flow<List<Speaker>> = channelFlow {
+    val query = speakersRef
+    val listener = query.addValueEventListener(object : ValueEventListener {
+      override fun onDataChange(data: DataSnapshot) {
+        if (data.exists()) {
+          channel.offer(data.children.map { it.toSpeaker() }.sortedBy { it.name })
         }
+      }
+      override fun onCancelled(error: DatabaseError) {
+        Timber.error(error.toException()) { "Error fetching speaker list from Firebase." }
+      }
+    })
 
-        val listener = object : ValueEventListener {
-            override fun onDataChange(data: DataSnapshot?) {
-                val typeIndicator = object : GenericTypeIndicator<HashMap<String, Speaker>>() {}
-                onComplete(data?.getValue(typeIndicator))
-            }
+    awaitClose { query.removeEventListener(listener) }
+  }
 
-            override fun onCancelled(e: DatabaseError?) {
-                onComplete(null)
-            }
+  override fun speaker(speakerId: String): Flow<Speaker> = channelFlow {
+    val query = speakersRef.child(speakerId)
+    val listener = query.addValueEventListener(object : ValueEventListener {
+      override fun onDataChange(data: DataSnapshot) {
+        if (data.exists()) {
+          channel.offer(data.toSpeaker())
         }
-        listeners[key] = listener
+      }
 
-        val query = database.child("speakers")
-        query.addValueEventListener(listener)
-        queries[key] = query
-    }
+      override fun onCancelled(error: DatabaseError) {
+        Timber.error(error.toException()) { "Error fetching speaker from Firebase." }
+      }
 
-    override fun addSpeakerListener(id: String, onComplete: (Speaker?) -> Unit) {
-        if (queries[id] != null) {
-            removeSpeakerListener(id)
-        }
+    })
 
-        val listener = object : ValueEventListener {
-            override fun onDataChange(data: DataSnapshot?) {
-                onComplete(data?.getValue(Speaker::class.java))
-            }
+    awaitClose { query.removeEventListener(listener) }
+  }
 
-            override fun onCancelled(e: DatabaseError?) {
-                onComplete(null)
-            }
-        }
-        listeners[id] = listener
-
-        val query = database.child("speakers").child(id)
-        query.addValueEventListener(listener)
-        queries[id] = query
-    }
-
-    override fun removeSpeakerListener(key: Any) {
-        val query = queries[key]
-        query?.removeEventListener(listeners[key])
-
-        queries.remove(key)
-        listeners.remove(key)
-    }
+  override suspend fun avatar(speakerId: String): String {
+    val url = avatarRef.child(speakerId).downloadUrl.await()
+    return url.toString()
+  }
 }

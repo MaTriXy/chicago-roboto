@@ -1,127 +1,121 @@
 package com.chicagoroboto.features.sessions
 
-import android.support.v4.content.ContextCompat
-import android.support.v7.widget.CardView
-import android.support.v7.widget.RecyclerView
 import android.text.format.DateUtils
 import android.text.format.DateUtils.formatDateTime
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
-import android.widget.ImageView
-import android.widget.TextView
+import androidx.core.content.ContextCompat
+import androidx.recyclerview.widget.DiffUtil
+import androidx.recyclerview.widget.ListAdapter
+import androidx.recyclerview.widget.RecyclerView
 import com.chicagoroboto.R
-import com.chicagoroboto.model.Session
-import com.chicagoroboto.model.Speaker
+import com.chicagoroboto.databinding.ItemSessionBinding
+import com.chicagoroboto.features.sessions.SessionAdapter.ViewHolder
+import com.chicagoroboto.features.sessions.SessionListPresenter.Model.Session
 import com.chicagoroboto.utils.DrawableUtils
-import kotlinx.android.synthetic.main.item_session.view.*
-import java.util.Date
+import java.util.*
 
-internal class SessionAdapter(val onSessionSelectedListener: ((session: Session) -> Unit)) :
-        RecyclerView.Adapter<SessionAdapter.ViewHolder>() {
+internal class SessionAdapter(
+    private val inflater: LayoutInflater,
+    private val callback: Callback
+) : ListAdapter<Session, ViewHolder>(SessionItemCallback) {
 
-    val sessions: MutableList<Session> = mutableListOf()
-    val speakers: MutableMap<String, Speaker> = mutableMapOf()
-    val favorites: MutableSet<String> = mutableSetOf()
+  interface Callback {
+    fun onSessionClicked(session: Session)
+  }
 
-    override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): ViewHolder {
-        val view = LayoutInflater.from(parent.context).inflate(R.layout.item_session, parent, false)
-        return ViewHolder(view, onSessionSelectedListener)
+  override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): ViewHolder {
+    val view = ItemSessionBinding.inflate(inflater, parent, false)
+    return ViewHolder(view, callback)
+  }
+
+  override fun onBindViewHolder(holder: ViewHolder, position: Int) {
+    val session = getItem(position)
+    val firstInTimeSlot = position == 0 ||
+        (getItem(position - 1).session.startTime != session.session.startTime)
+
+    holder.bindSession(session, firstInTimeSlot)
+  }
+
+  internal class ViewHolder(
+      internal val binding: ItemSessionBinding,
+      private val callback: Callback
+  ) : RecyclerView.ViewHolder(binding.root), View.OnClickListener {
+
+    var session: Session? = null
+
+    init {
+      binding.card.setOnClickListener(this)
     }
 
-    override fun onBindViewHolder(holder: ViewHolder, position: Int) {
-        val context = holder.itemView.context
-        val session = sessions[position]
-
-        holder.session = session
-
-        val startTime = formatDateTime(context, session.startTime?.time ?: 0, DateUtils.FORMAT_SHOW_TIME)
-        val endTime = formatDateTime(context, session.endTime?.time ?: 0, DateUtils.FORMAT_SHOW_TIME)
-        holder.timeslot.text = String.format(context.getString(R.string.session_time), startTime, endTime)
-
-        // Dim the session card once hte session is over
-        val now = Date()
-        if (now.before(session.endTime)) {
-            holder.card.setBackgroundColor(ContextCompat.getColor(context, R.color.session_bg))
-        } else {
-            holder.card.setBackgroundColor(ContextCompat.getColor(context, R.color.session_finished_bg))
-        }
-
-        holder.title.text = session.title
-
-        val sessionSpeakers = session.speakers?.map { speakers[it] }
-        if (sessionSpeakers == null || sessionSpeakers.isEmpty()) {
-            holder.speakers.visibility = View.GONE
-        } else {
-            holder.speakers.visibility = View.VISIBLE
-            holder.speakers.text = sessionSpeakers.map { it?.name }.joinToString()
-            holder.room.setCompoundDrawablesWithIntrinsicBounds(
-                DrawableUtils.create(context, R.drawable.ic_speaker),
-                null,
-                null,
-                null)
-        }
-
-        if (session.room == null) {
-            holder.room.visibility = View.GONE
-        } else {
-            holder.room.visibility = View.VISIBLE
-            holder.room.text = session.room
-            holder.room.setCompoundDrawablesWithIntrinsicBounds(
-                DrawableUtils.create(context, R.drawable.ic_room),
-                null,
-                null,
-                null)
-        }
-
-        if (favorites.contains(session.id)) {
-            holder.favorite.visibility = View.VISIBLE
-        } else {
-            holder.favorite.visibility = View.GONE
-        }
-
-        if (position > 0) {
-            val previous = sessions[position - 1]
-            holder.timeslot.visibility = if (previous.startTime == session.startTime) {
-                View.INVISIBLE
-            } else {
-                View.VISIBLE
-            }
-        } else {
-            holder.timeslot.visibility = View.VISIBLE
-        }
+    override fun onClick(v: View?) {
+      session?.let { callback.onSessionClicked(it) }
     }
 
-    override fun getItemCount(): Int {
-        return sessions.size
+    fun bindSession(session: Session, isFirstInTimeSlot: Boolean) {
+      this.session = session
+
+      val context = binding.root.context
+      val startTime = formatDateTime(context, session.session.startTime?.time ?: 0,
+          DateUtils.FORMAT_SHOW_TIME)
+      val endTime = formatDateTime(context, session.session.endTime?.time ?: 0,
+          DateUtils.FORMAT_SHOW_TIME)
+      binding.timeslot.text = context.getString(R.string.session_time, startTime, endTime)
+
+      // Dim the session card once the session is over
+      val now = Date()
+      val bgColor = if (now.before(session.session.endTime)) {
+        R.color.session_bg
+      } else {
+        R.color.session_finished_bg
+      }
+      binding.card.setBackgroundColor(ContextCompat.getColor(context, bgColor))
+
+      binding.title.text = session.session.title
+
+      if (session.speakers.isEmpty()) {
+        binding.speakers.visibility = View.GONE
+      } else {
+        binding.speakers.visibility = View.VISIBLE
+        binding.speakers.text = session.speakers.joinToString { it.name }
+        binding.room.setCompoundDrawablesWithIntrinsicBounds(
+            DrawableUtils.create(context, R.drawable.ic_speaker),
+            null,
+            null,
+            null)
+      }
+
+      if (session.session.location.isBlank()) {
+        binding.room.visibility = View.GONE
+      } else {
+        binding.room.visibility = View.VISIBLE
+        binding.room.text = session.session.location
+        binding.room.setCompoundDrawablesWithIntrinsicBounds(
+            DrawableUtils.create(context, R.drawable.ic_room),
+            null,
+            null,
+            null)
+      }
+
+      binding.favorite.visibility = if (session.isFavorite) View.VISIBLE else View.GONE
+
+      if (isFirstInTimeSlot) {
+        binding.timeslot.visibility = View.VISIBLE
+      } else {
+        binding.timeslot.visibility = View.INVISIBLE
+      }
+    }
+  }
+
+  private object SessionItemCallback : DiffUtil.ItemCallback<Session>() {
+    override fun areItemsTheSame(oldItem: Session, newItem: Session): Boolean {
+      return oldItem.session.id == newItem.session.id
     }
 
-    internal class ViewHolder(itemView: View, private val onSessionSelectedListener: ((session: Session) -> Unit)) :
-            RecyclerView.ViewHolder(itemView), View.OnClickListener {
-
-        var session: Session? = null
-
-        val card: CardView
-        val timeslot: TextView
-        val title: TextView
-        val speakers: TextView
-        val room: TextView
-        val favorite: ImageView
-
-        init {
-            card = super.itemView.card
-            timeslot = super.itemView.timeslot
-            title = super.itemView.title
-            speakers = super.itemView.speakers
-            room = super.itemView.room
-            favorite = super.itemView.favorite
-            itemView.setOnClickListener(this)
-        }
-
-        override fun onClick(v: View?) {
-            if (session != null) {
-                onSessionSelectedListener(session!!)
-            }
-        }
+    override fun areContentsTheSame(oldItem: Session, newItem: Session): Boolean {
+      return oldItem == newItem
     }
+
+  }
 }

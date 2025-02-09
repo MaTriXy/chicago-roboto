@@ -1,7 +1,7 @@
 package com.chicagoroboto.features
 
-import android.support.design.widget.TabLayout
+import com.google.android.material.tabs.TabLayout
 
 interface TabHolder {
-    var tabLayout: TabLayout?
+    val tabLayout: TabLayout?
 }

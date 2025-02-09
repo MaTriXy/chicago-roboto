@@ -2,7 +2,12 @@ package com.chicagoroboto.features.speakerlist
 
 import dagger.Subcomponent
 
-@Subcomponent(modules = arrayOf(SpeakerListModule::class))
+@Subcomponent
 interface SpeakerListComponent {
-    fun inject(speakerListView: SpeakerListView)
+  fun inject(speakerListFragment: SpeakerListFragment)
+
+  @Subcomponent.Factory
+  interface Factory {
+    fun create(): SpeakerListComponent
+  }
 }
